@@ -1,0 +1,269 @@
+﻿@page "/"
+@using System.Security.Claims
+@using AutoMapper
+
+@inject IMapper Mapper
+@inject IViewOrdersUseCase ViewOrdersUseCase
+@inject IAddOrderDetailUseCase AddOrderDetailUseCase
+@inject IEditOrderDetailUseCase EditOrderDetailUseCase
+@inject IViewOrderDetailsByOrderIdUseCase ViewOrderDetailsByOrderIdUseCase
+
+<style>
+    #wrapper {
+        overflow: auto;
+        margin-bottom: -1rem !important;
+    }
+
+    #c1 {
+        float: right;
+    }
+
+    #c2 {
+        float: right;
+    }
+
+    #c3 {
+        float: right;
+    }
+
+    h1 {
+        margin-bottom: 0.1rem !important;
+    }
+
+    
+</style>
+
+
+<RadzenDataGrid @ref="_grid" AllowFiltering="true" AllowPaging="true" PageSize="5" AllowSorting="false" RowClick="RowClick" ExpandMode="DataGridExpandMode.Single"
+                Data="@_ordersDto" TItem="OrderDto" EditMode="DataGridEditMode.Single" @bind-Value="@SelectedOrders"
+                ShowExpandColumn="false" ShowPagingSummary="true" AllowColumnResize="true" >
+<Template Context="order">
+<RadzenTabs>
+<Tabs>
+<RadzenTabsItem Text="Order Details">
+    <div id="wrapper">
+        <RadzenButton Icon="add_circle_outline" style="margin-bottom: 10px" Text="Add Order Detail" Click="@(() => InsertDetailRow(order.Id))" Disabled="@(_detailToInsert != null)" Size="ButtonSize.Small"/>
+    </div>
+<RadzenDataGrid @ref="_gridDetail" AllowFiltering="@(_detailToInsert == null)" AllowPaging="true" PageSize="5" AllowSorting="@(_detailToInsert == null)" Data="@order.OrderDetailsDto"
+                TItem="OrderDetailDto" EditMode="DataGridEditMode.Multiple" RowUpdate="@OnUpdateRowDetail" RowCreate="@OnCreateRowDetail" AllowColumnResize="true"
+                                    AllowColumnPicking="true" ShowPagingSummary="true" ColumnWidth="150px" Density="Density.Compact" >
+<Columns>
+
+<RadzenDataGridColumn TItem="OrderDetailDto" Property="ProductCode" Title="Product  Code" OrderIndex="2">
+    <EditTemplate Context="orderDetail">
+        <RadzenTextBox @bind-Value="orderDetail.ProductCode" Style="width: 100%; display: block" Name="ProductCode" />        
+    </EditTemplate>
+</RadzenDataGridColumn>
+<RadzenDataGridColumn TItem="OrderDetailDto" Property="Quantity" Title="Quantity" OrderIndex="7">
+    <EditTemplate Context="orderDetail">
+        <RadzenNumeric TValue="int" Min="1" @bind-Value="orderDetail.Quantity" Style="width: 100%; display: block" Name="Quantity"/>        
+    </EditTemplate>    
+</RadzenDataGridColumn>
+<RadzenDataGridColumn TItem="OrderDetailDto" Property="CostRatio" Title="Cost Ratio" OrderIndex="10">
+    <EditTemplate Context="orderDetail">
+        <RadzenNumeric TValue="double" Min="0" @bind-Value="orderDetail.CostRatio" Style="width: 100%; display: block" Name="CostRatio"/>
+    </EditTemplate>
+</RadzenDataGridColumn>
+<RadzenDataGridColumn TItem="OrderDetailDto" Property="PoNotes" Title="PO Notes" OrderIndex="23">
+    <EditTemplate Context="orderDetail">
+        <RadzenTextBox @bind-Value="orderDetail.PoNotes" Style="width: 100%; display: block" Name="PoNotes"/>
+    </EditTemplate>
+</RadzenDataGridColumn>
+<RadzenDataGridColumn TItem="OrderDetailDto" Context="orderDetail" Filterable="false" Sortable="false" TextAlign="TextAlign.Center" Width="200px" OrderIndex="24">
+    <Template Context="detail">
+        <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Primary" Class="m-1" Click="@(args => EditRowDetail(detail))" @onclick:stopPropagation="true" Size="ButtonSize.Small">
+        </RadzenButton>
+    </Template>
+    <EditTemplate Context="detail">
+        <RadzenButton Icon="check" ButtonStyle="ButtonStyle.Primary" Class="m-1" Click="@(args => SaveRowDetail(detail))" @onclick:stopPropagation="true" Size="ButtonSize.Small">
+        </RadzenButton>        
+    </EditTemplate>
+</RadzenDataGridColumn>
+</Columns>
+</RadzenDataGrid>
+</RadzenTabsItem>
+
+</Tabs>
+</RadzenTabs>
+</Template>
+<Columns>
+        <RadzenDataGridColumn TItem="OrderDto" Property="OrderDateTime" Title="Order Date" Width="200px" Filterable="false">
+            <Template Context="order">
+                @($"{order.OrderDateTime:dd/MM/yyyy}")
+            </Template>
+            <EditTemplate Context="order">
+                <RadzenDatePicker @bind-Value="order.OrderDateTime" DateFormat="dd/MM/yyyy HH:mm" Class="w-100" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="OrderDto" Property="Status" Title="Status" Width="100px"/>
+
+</Columns>
+</RadzenDataGrid>
+
+@code {
+
+
+    IList<OrderDto?> SelectedOrders { get; set; }
+    IQueryable<OrderDto?> _ordersDto;
+    IQueryable<Order?> _order;   
+
+    RadzenDataGrid<OrderDto?> _grid;
+    RadzenDataGrid<OrderDetailDto> _gridDetail;
+
+    OrderDto? _orderToInsert;
+    OrderDetailDto? _detailToInsert;
+    OrderDto orders;
+    Order orderMap;
+    OrderDetail orderDetailMap;
+
+    int? current_page;
+    int? pageIndex;
+
+    ClaimsPrincipal user;
+
+    private async Task InsertDetailRow(int id)
+    {
+        _detailToInsert = new OrderDetailDto
+        {
+            OrderId = id,
+            Status = "Order Opened"
+        };
+
+        await _gridDetail.InsertRow(_detailToInsert);
+
+    }
+
+    async Task EditRow(OrderDto? order)
+    {
+        await _grid.EditRow(order);
+    }
+    
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _grid.SettingsChanged = new EventCallback<DataGridSettings>(this, async (DataGridSettings settings) =>
+            {
+                current_page = settings.CurrentPage;
+            });
+        }
+        base.OnAfterRender(firstRender);
+    }
+   
+    protected override async Task OnInitializedAsync()
+    {
+        _order = ViewOrdersUseCase.Execute();
+        _ordersDto = Mapper.ProjectTo<OrderDto>(_order);
+           
+        SelectedOrders = new List<OrderDto?> { _ordersDto.FirstOrDefault() };
+        
+    }
+    
+    private async Task RowClick(DataGridRowMouseEventArgs<OrderDto> mouseClick)
+    {
+        await _grid!.ExpandRow(mouseClick.Data);
+        SelectedOrders = _ordersDto.Where(o => o.Id == mouseClick.Data.Id).ToList();
+
+        if (SelectedOrders.Count > 0)
+        {
+            if (SelectedOrders[0].Status == "Completed" || SelectedOrders[0].Status == "Cancelled")
+            {
+                _detailToInsert = new OrderDetailDto();
+            }
+            else
+            {
+                _detailToInsert = null;
+            }
+        }
+    }
+    
+    // Add a method to find the parent OrderDto of a given OrderDetailDto
+    private OrderDto? GetParentOrder(OrderDetailDto detail)
+    {
+        return _ordersDto.FirstOrDefault(o => o.OrderDetailsDto.Any(d => d.Id == detail.Id));
+    }
+
+    private async Task OnCreateRowDetail(OrderDetailDto? orderDetail)
+    {
+        if (orderDetail != null)
+        {
+            orderDetailMap = new OrderDetail();
+            Mapper.Map(orderDetail, orderDetailMap);
+
+            // Add the new order detail to the database
+            var addedOrderDetail = await AddOrderDetailUseCase.ExecuteAsync(orderDetailMap);
+
+            Mapper.Map(addedOrderDetail, orderDetail);
+            // Find the parent order
+            var parentOrder = GetParentOrder(orderDetail);
+
+            if (parentOrder != null)
+            {
+                pageIndex = current_page;
+                _order = ViewOrdersUseCase.Execute();
+                _ordersDto = Mapper.ProjectTo<OrderDto>(_order);
+
+                await _gridDetail.GoToPage((int)pageIndex);
+                await _grid.ExpandRow(_ordersDto.FirstOrDefault(o => o.Id == parentOrder.Id));
+
+                
+            }
+            
+        }
+    }    
+   
+    private async Task OnUpdateRowDetail(OrderDetailDto orderDetail)
+    {
+        if (orderDetail == _detailToInsert)
+        {
+            _detailToInsert = null;
+        }
+
+        if (orderDetail != null)
+        {
+            orderDetailMap = new OrderDetail();
+            Mapper.Map(orderDetail, orderDetailMap);
+
+            // Update the order detail in the database
+            var updatedOrderDetail = await EditOrderDetailUseCase.ExecuteAsync(orderDetailMap);
+
+            // Find the parent order
+            var parentOrder = GetParentOrder(orderDetail);
+
+            if (parentOrder != null)
+            {
+                parentOrder.OrderDetailsDto = Mapper.Map<List<OrderDetailDto>>(
+                    await ViewOrderDetailsByOrderIdUseCase.ExecuteAsync(parentOrder.Id)
+                );
+
+                // Notify Blazor of the changes 
+                StateHasChanged(); 
+            }
+        } 
+    }
+
+    async Task EditRowDetail(OrderDetailDto orderDetail)
+    {
+        await _gridDetail.EditRow(orderDetail);
+    }     
+
+    async Task SaveRowDetail(OrderDetailDto orderDetail)
+    {
+        await _gridDetail.UpdateRow(orderDetail);
+
+        if (orderDetail.ProductCode != null)
+        {
+            if (orderDetail == _detailToInsert)
+            {
+                _detailToInsert = null;
+            }
+        }
+
+        await _gridDetail.ExpandRow(orderDetail);
+        StateHasChanged();
+
+    }
+   
+}
+
+
